@@ -1,0 +1,28 @@
+{
+  "name": "claude-chat",
+  "version": "1.0.0",
+  "description": "Chat application powered by Claude via the Anthropic API",
+  "scripts": {
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "esbuild src/client/app.ts --bundle --outfile=dist/public/app.js --platform=browser",
+    "copy:assets": "cp src/client/index.html dist/public/ && cp src/client/style.css dist/public/",
+    "build": "mkdir -p dist/public && npm run build:server && npm run build:client && npm run copy:assets",
+    "start": "node dist/server/index.js",
+    "dev:server": "tsx watch src/server/index.ts",
+    "dev:client": "esbuild src/client/app.ts --bundle --outfile=dist/public/app.js --platform=browser --watch",
+    "dev": "mkdir -p dist/public && npm run copy:assets && concurrently \"npm run dev:server\" \"npm run dev:client\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "concurrently": "^8.0.0",
+    "esbuild": "^0.20.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.0.0"
+  }
+}
