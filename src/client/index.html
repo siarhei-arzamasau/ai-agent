@@ -69,6 +69,20 @@
           </div>
           <input type="text" id="stopSeqs" class="setting-text" placeholder="e.g. END, STOP">
         </div>
+        <div class="setting-item setting-item--strategy">
+          <div class="setting-label-inline">Strategy</div>
+          <div class="strategy-toggle" id="strategyToggle">
+            <button class="strategy-btn" data-strategy="default">Default</button>
+            <button class="strategy-btn" data-strategy="sliding-window">Sliding Window</button>
+            <button class="strategy-btn" data-strategy="sticky-facts">Sticky Facts</button>
+            <button class="strategy-btn" data-strategy="branching">Branching</button>
+          </div>
+          <div id="slidingWindowConfig" class="sw-config" hidden>
+            <span class="setting-hint">Window:</span>
+            <input type="number" id="slidingWindowSize" class="sw-input" min="1" max="100" value="10">
+            <span class="setting-hint">Q&A pairs</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -78,7 +92,20 @@
         <div class="sidebar-sessions" id="sessionList"></div>
       </aside>
 
+      <aside class="facts-panel" id="factsPanel">
+        <div class="facts-header">Sticky Facts</div>
+        <div class="facts-list" id="factsList">
+          <div class="facts-empty">No facts yet</div>
+        </div>
+      </aside>
+
       <div class="chat-area">
+        <div class="branch-bar" id="branchBar">
+          <div class="branch-tabs" id="branchTabs"></div>
+          <button id="createBranchBtn" class="btn-branch">+ Branch</button>
+          <button id="compareBtn" class="btn-compare" hidden>Compare</button>
+        </div>
+
         <main class="main">
           <div id="messages" class="messages">
             <div id="welcome" class="welcome">
@@ -108,6 +135,17 @@
           <div id="sessionStats" class="session-stats" hidden></div>
           <p class="footer-note">Claude can make mistakes. Verify important information.</p>
         </footer>
+      </div>
+    </div>
+
+    <div class="compare-modal" id="compareModal" hidden>
+      <div class="compare-overlay" id="compareOverlay"></div>
+      <div class="compare-dialog">
+        <div class="compare-header">
+          <span>Branch Comparison</span>
+          <button id="compareCloseBtn" class="compare-close">×</button>
+        </div>
+        <div class="compare-body" id="compareBody"></div>
       </div>
     </div>
   </div>

@@ -9,6 +9,15 @@ interface SessionMeta {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  strategy?: string;
+  slidingWindowSize?: number;
+}
+
+interface BranchData {
+  id: string;
+  label: string;
+  createdAt: string;
+  messages: Message[];
 }
 
 interface Settings {
@@ -52,6 +61,15 @@ function renderMarkdown(raw: string): string {
   return s;
 }
 
+function strategyLabel(strategy?: string, slidingWindowSize?: number): string {
+  switch (strategy) {
+    case 'sliding-window': return `Sliding Window (${slidingWindowSize ?? '?'})`;
+    case 'sticky-facts':   return 'Sticky Facts';
+    case 'branching':      return 'Branching';
+    default:               return 'default';
+  }
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
@@ -64,13 +82,27 @@ function formatDate(iso: string): string {
 }
 
 class Chat {
-  private contextSummary = ''; // system prompt built from summaries of previous sessions
   private history: Message[] = [];        // current session — displayed and saved
   private sessionId: string | null = null;
   private streaming = false;
 
+  private strategy = 'default';
+  private slidingWindowSize = 10;
+  private facts: Record<string, string> = {};
+  private branches: BranchData[] = [];
+  private activeBranchId: string | null = null;
+
   private lastInputTokens = 0;   // input tokens from the previous request in this session
   private sessionOutputTokens = 0; // accumulated output tokens for this session
+
+  private get apiMessages(): Message[] {
+    if (this.strategy === 'sliding-window') {
+      return this.history.slice(-(Math.max(1, this.slidingWindowSize) * 2));
+    }
+    // For branching: this.history holds only the active branch's messages,
+    // so each branch talks to Claude in isolation.
+    return this.history;
+  }
 
   private messagesEl = document.getElementById('messages') as HTMLDivElement;
   private welcomeEl = document.getElementById('welcome') as HTMLDivElement;
@@ -92,6 +124,21 @@ class Chat {
   private sessionListEl = document.getElementById('sessionList') as HTMLElement;
   private sidebarToggleBtn = document.getElementById('sidebarToggleBtn') as HTMLButtonElement;
   private sessionStatsEl = document.getElementById('sessionStats') as HTMLElement;
+
+  private strategyToggleEl = document.getElementById('strategyToggle') as HTMLElement;
+  private slidingWindowConfigEl = document.getElementById('slidingWindowConfig') as HTMLElement;
+  private slidingWindowSizeEl = document.getElementById('slidingWindowSize') as HTMLInputElement;
+  private factsPanelEl = document.getElementById('factsPanel') as HTMLElement;
+  private factsListEl = document.getElementById('factsList') as HTMLElement;
+
+  private branchBarEl = document.getElementById('branchBar') as HTMLElement;
+  private branchTabsEl = document.getElementById('branchTabs') as HTMLElement;
+  private createBranchBtn = document.getElementById('createBranchBtn') as HTMLButtonElement;
+  private compareBtn = document.getElementById('compareBtn') as HTMLButtonElement;
+  private compareModalEl = document.getElementById('compareModal') as HTMLElement;
+  private compareBodyEl = document.getElementById('compareBody') as HTMLElement;
+  private compareCloseBtnEl = document.getElementById('compareCloseBtn') as HTMLButtonElement;
+  private compareOverlayEl = document.getElementById('compareOverlay') as HTMLElement;
 
   constructor() {
     this.sendBtn.addEventListener('click', () => this.send());
@@ -122,23 +169,31 @@ class Chat {
 
     this.sidebarToggleBtn.addEventListener('click', () => this.toggleSidebar());
 
+    this.strategyToggleEl.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.strategy-btn') as HTMLButtonElement | null;
+      if (!btn) return;
+      const clicked = btn.dataset.strategy!;
+      this.strategy = this.strategy === clicked ? 'default' : clicked;
+      this.updateStrategyUI();
+    });
+
+    this.updateStrategyUI();
+
+    this.createBranchBtn.addEventListener('click', () => this.createBranch());
+    this.compareBtn.addEventListener('click', () => this.openCompare());
+    this.compareCloseBtnEl.addEventListener('click', () => this.closeCompare());
+    this.compareOverlayEl.addEventListener('click', () => this.closeCompare());
+
+    this.slidingWindowSizeEl.addEventListener('input', () => {
+      const val = parseInt(this.slidingWindowSizeEl.value, 10);
+      if (!isNaN(val) && val >= 1) this.slidingWindowSize = val;
+    });
+
     this.initContext();
   }
 
   private async initContext() {
-    await this.loadContext();
     await this.loadSessions();
-  }
-
-  private async loadContext(excludeId?: string) {
-    try {
-      const url = excludeId ? `/api/history?exclude=${excludeId}` : '/api/history';
-      const res = await fetch(url);
-      const data = await res.json();
-      this.contextSummary = data.system ?? '';
-    } catch {
-      this.contextSummary = '';
-    }
   }
 
   private toggleSidebar() {
@@ -199,13 +254,46 @@ class Chat {
   private async newChat() {
     this.sessionId = null;
     this.history = [];
+    this.facts = {};
+    this.branches = [];
+    this.activeBranchId = null;
+    this.renderFacts();
+    this.renderBranchTabs();
     this.lastInputTokens = 0;
     this.sessionOutputTokens = 0;
     this.updateSessionStats();
-    await this.loadContext(); // reload — now picks up the just-generated summary
+    this.updateStrategyUI();
     this.renderHistory();
     await this.refreshSessionList();
     this.inputEl.focus();
+  }
+
+  private updateStrategyUI() {
+    this.strategyToggleEl.querySelectorAll('.strategy-btn').forEach(btn => {
+      btn.classList.toggle('active', (btn as HTMLElement).dataset.strategy === this.strategy);
+    });
+    this.slidingWindowConfigEl.hidden = this.strategy !== 'sliding-window';
+    this.factsPanelEl.classList.toggle('visible', this.strategy === 'sticky-facts');
+    const isBranching = this.strategy === 'branching';
+    this.branchBarEl.classList.toggle('visible', isBranching);
+  }
+
+  private renderFacts() {
+    this.factsListEl.innerHTML = '';
+    const entries = Object.entries(this.facts);
+    if (entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'facts-empty';
+      empty.textContent = 'No facts yet';
+      this.factsListEl.appendChild(empty);
+      return;
+    }
+    for (const [key, value] of entries) {
+      const item = document.createElement('div');
+      item.className = 'facts-item';
+      item.innerHTML = `<span class="facts-key">${escapeHtml(key)}</span><span class="facts-value">${escapeHtml(value)}</span>`;
+      this.factsListEl.appendChild(item);
+    }
   }
 
   private updateSessionStats() {
@@ -306,7 +394,10 @@ class Chat {
       info.className = 'session-info';
       info.innerHTML = `
         <div class="session-title">${escapeHtml(s.title)}</div>
-        <div class="session-date">${formatDate(s.updatedAt)}</div>
+        <div class="session-meta">
+          <span class="session-date">${formatDate(s.updatedAt)}</span>
+          <span class="session-strategy${s.strategy ? ' session-strategy--active' : ''}">${strategyLabel(s.strategy, s.slidingWindowSize)}</span>
+        </div>
       `;
       info.addEventListener('click', () => this.openSession(s.id));
 
@@ -327,14 +418,24 @@ class Chat {
 
   private async openSession(id: string) {
     try {
-      const [sessionRes] = await Promise.all([
-        fetch(`/api/sessions/${id}`),
-        this.loadContext(id), // load all sessions except this one as background context
-      ]);
+      const sessionRes = await fetch(`/api/sessions/${id}`);
       if (!sessionRes.ok) return;
       const session = await sessionRes.json();
       this.sessionId = id;
-      this.history = session.messages;
+      this.strategy = session.strategy ?? 'default';
+      this.slidingWindowSize = session.slidingWindowSize ?? 10;
+      this.facts = session.facts ?? {};
+      this.branches = session.branches ?? [];
+      this.activeBranchId = session.activeBranchId ?? null;
+      if (this.activeBranchId) {
+        const active = this.branches.find(b => b.id === this.activeBranchId);
+        this.history = active ? [...active.messages] : [...session.messages];
+      } else {
+        this.history = [...session.messages];
+      }
+      this.renderFacts();
+      this.renderBranchTabs();
+      this.updateStrategyUI();
       this.renderHistory();
       await this.refreshSessionList();
     } catch {
@@ -343,19 +444,41 @@ class Chat {
   }
 
   private async saveSession() {
-    if (this.history.length === 0) return;
+    if (this.history.length === 0 && this.branches.length === 0) return;
     try {
+      const strategy = (this.strategy === 'none' || this.strategy === 'default') ? undefined : this.strategy;
+      const slidingWindowSize = strategy === 'sliding-window' ? this.slidingWindowSize : undefined;
+      const facts = strategy === 'sticky-facts' ? this.facts : undefined;
+
+      // Keep active branch in sync before saving
+      let branches: BranchData[] | undefined;
+      let activeBranchId: string | undefined;
+      if (strategy === 'branching' && this.branches.length > 0) {
+        branches = this.branches.map(b =>
+          b.id === this.activeBranchId ? { ...b, messages: this.history } : b
+        );
+        activeBranchId = this.activeBranchId ?? undefined;
+      }
+
+      const body = {
+        messages: this.history,
+        strategy,
+        slidingWindowSize,
+        facts,
+        ...(branches && { branches, activeBranchId }),
+      };
+
       if (this.sessionId) {
         await fetch(`/api/sessions/${this.sessionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: this.history }),
+          body: JSON.stringify(body),
         });
       } else {
         const res = await fetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: this.history }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         this.sessionId = data.id;
@@ -380,6 +503,137 @@ class Chat {
     }
   }
 
+  private nextBranchLabel(): string {
+    return String.fromCharCode(65 + this.branches.length); // A, B, C, …
+  }
+
+  private createBranch() {
+    if (this.branches.length === 0) {
+      // First branch: wrap current history as Branch A, create Branch B as copy
+      const now = new Date().toISOString();
+      const branchA: BranchData = {
+        id: crypto.randomUUID(),
+        label: 'Branch A',
+        createdAt: now,
+        messages: [...this.history],
+      };
+      const branchB: BranchData = {
+        id: crypto.randomUUID(),
+        label: 'Branch B',
+        createdAt: now,
+        messages: [...this.history],
+      };
+      this.branches = [branchA, branchB];
+      this.activeBranchId = branchB.id;
+    } else {
+      // Sync active branch first
+      if (this.activeBranchId) {
+        this.branches = this.branches.map(b =>
+          b.id === this.activeBranchId ? { ...b, messages: [...this.history] } : b
+        );
+      }
+      const newBranch: BranchData = {
+        id: crypto.randomUUID(),
+        label: `Branch ${this.nextBranchLabel()}`,
+        createdAt: new Date().toISOString(),
+        messages: [...this.history],
+      };
+      this.branches = [...this.branches, newBranch];
+      this.activeBranchId = newBranch.id;
+    }
+    this.renderBranchTabs();
+    this.updateStrategyUI();
+    this.saveSession();
+  }
+
+  private switchBranch(id: string) {
+    if (id === this.activeBranchId) return;
+    // Sync current history into active branch
+    if (this.activeBranchId) {
+      this.branches = this.branches.map(b =>
+        b.id === this.activeBranchId ? { ...b, messages: [...this.history] } : b
+      );
+    }
+    const target = this.branches.find(b => b.id === id);
+    if (!target) return;
+    this.activeBranchId = id;
+    this.history = [...target.messages];
+    this.renderBranchTabs();
+    this.renderHistory();
+    this.saveSession();
+  }
+
+  private renderBranchTabs() {
+    this.branchTabsEl.innerHTML = '';
+    for (const branch of this.branches) {
+      const tab = document.createElement('button');
+      tab.className = 'branch-tab' + (branch.id === this.activeBranchId ? ' active' : '');
+      tab.textContent = branch.label;
+      tab.addEventListener('click', () => this.switchBranch(branch.id));
+      this.branchTabsEl.appendChild(tab);
+    }
+    this.compareBtn.hidden = this.branches.length < 2;
+  }
+
+  private openCompare() {
+    this.compareBodyEl.innerHTML = '';
+
+    // Sync active branch before comparing
+    const branches = this.branches.map(b =>
+      b.id === this.activeBranchId ? { ...b, messages: [...this.history] } : b
+    );
+
+    // Find fork point: longest common prefix across all branches
+    let forkIdx = 0;
+    const minLen = Math.min(...branches.map(b => b.messages.length));
+    outer: for (let i = 0; i < minLen; i++) {
+      const ref = branches[0].messages[i].content;
+      const sameRole = branches[0].messages[i].role;
+      for (const branch of branches.slice(1)) {
+        if (branch.messages[i].content !== ref || branch.messages[i].role !== sameRole) break outer;
+      }
+      forkIdx = i + 1;
+    }
+
+    for (const branch of branches) {
+      const col = document.createElement('div');
+      col.className = 'compare-col';
+
+      const header = document.createElement('div');
+      header.className = 'compare-col-header';
+      header.textContent = branch.label + (branch.id === this.activeBranchId ? ' ✦' : '');
+      col.appendChild(header);
+
+      const body = document.createElement('div');
+      body.className = 'compare-col-body';
+
+      for (let i = 0; i < branch.messages.length; i++) {
+        if (i === forkIdx && forkIdx < branch.messages.length) {
+          const marker = document.createElement('div');
+          marker.className = 'compare-fork-marker';
+          marker.textContent = '— fork point —';
+          body.appendChild(marker);
+        }
+        const msg = branch.messages[i];
+        const msgEl = document.createElement('div');
+        msgEl.className = 'compare-msg';
+        msgEl.innerHTML = `
+          <div class="compare-msg-role ${msg.role}">${msg.role}</div>
+          <div class="compare-msg-content">${escapeHtml(msg.content)}</div>
+        `;
+        body.appendChild(msgEl);
+      }
+      col.appendChild(body);
+      this.compareBodyEl.appendChild(col);
+    }
+
+    this.compareModalEl.hidden = false;
+  }
+
+  private closeCompare() {
+    this.compareModalEl.hidden = true;
+  }
+
   private async send() {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
@@ -400,13 +654,18 @@ class Chat {
     const startTime = Date.now();
 
     try {
+      const factsEntries = Object.entries(this.facts);
+      const system = this.strategy === 'sticky-facts' && factsEntries.length > 0
+        ? 'Key facts from this conversation:\n' + factsEntries.map(([k, v]) => `- ${k}: ${v}`).join('\n')
+        : '';
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: this.history,
+          messages: this.apiMessages,
           settings: this.getSettings(),
-          ...(this.contextSummary && { system: this.contextSummary }),
+          ...(system && { system }),
         }),
       });
 
@@ -459,10 +718,30 @@ class Chat {
       }
 
       this.history.push({ role: 'assistant', content: accumulated });
+      if (this.strategy === 'branching' && this.activeBranchId) {
+        this.branches = this.branches.map(b =>
+          b.id === this.activeBranchId ? { ...b, messages: [...this.history] } : b
+        );
+      }
+      if (this.strategy === 'sliding-window') {
+        const maxMsgs = Math.max(1, this.slidingWindowSize) * 2;
+        if (this.history.length > maxMsgs) {
+          this.history = this.history.slice(-maxMsgs);
+        }
+      }
       assistantBubble.innerHTML = renderMarkdown(accumulated);
       await this.saveSession();
-      if (this.sessionId && (this.history.length / 2) % 3 === 0) {
-        fetch(`/api/sessions/${this.sessionId}/summarize`, { method: 'POST' }).catch(() => {});
+
+      if (this.strategy === 'sticky-facts' && this.sessionId) {
+        const userMsg = this.history[this.history.length - 2]?.content ?? '';
+        fetch(`/api/sessions/${this.sessionId}/extract-facts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userMessage: userMsg, assistantMessage: accumulated }),
+        })
+          .then(r => r.json())
+          .then(data => { this.facts = data.facts ?? {}; this.renderFacts(); })
+          .catch(() => {});
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unexpected error';
