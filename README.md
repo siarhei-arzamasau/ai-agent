@@ -5,13 +5,14 @@ A streaming chat application powered by Claude via the Anthropic API. Built with
 ## Prerequisites
 
 - Node.js 18+
+- pnpm 11+
 - An [Anthropic API key](https://console.anthropic.com/)
 
 ## Setup
 
 1. Install dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 
 2. Copy the example environment file and add your API key:
@@ -25,7 +26,7 @@ A streaming chat application powered by Claude via the Anthropic API. Built with
 ### Development (with hot reload)
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Starts the Express server with `tsx watch` and the esbuild client bundler in parallel. Open [http://localhost:3000](http://localhost:3000).
@@ -33,11 +34,11 @@ Starts the Express server with `tsx watch` and the esbuild client bundler in par
 ### Production
 
 ```bash
-npm run build
-npm start
+pnpm build
+pnpm start
 ```
 
-`npm run build` compiles the TypeScript server and bundles the client. `npm start` runs the compiled output.
+`pnpm build` compiles the TypeScript server and bundles the client. `pnpm start` runs the compiled output.
 
 ## Environment variables
 
