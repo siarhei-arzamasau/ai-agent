@@ -80,6 +80,146 @@ body {
   height: 100vh;
 }
 
+.body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── Sidebar ── */
+
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.22s ease;
+}
+
+.sidebar.collapsed {
+  width: 0;
+}
+
+.sidebar-header {
+  padding: 12px 14px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar-sessions {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.sidebar-sessions::-webkit-scrollbar { width: 4px; }
+.sidebar-sessions::-webkit-scrollbar-track { background: transparent; }
+.sidebar-sessions::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.session-empty {
+  padding: 16px 14px;
+  font-size: 12px;
+  color: var(--text-placeholder);
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px 2px 8px;
+}
+
+.session-info {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 6px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.session-info:hover {
+  background: var(--bg-hover);
+}
+
+.session-item.active .session-info {
+  background: var(--accent-light);
+}
+
+.session-title {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-item.active .session-title {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.session-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.session-delete {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+
+.session-item:hover .session-delete {
+  opacity: 1;
+}
+
+.session-delete:hover {
+  background: var(--bg-hover);
+  color: var(--error);
+}
+
+/* ── Chat area ── */
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Header logo group ── */
+
+.logo-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ── Header ── */
 
 .header {
@@ -294,6 +434,7 @@ body {
   flex: 1;
   overflow-y: auto;
   scroll-behavior: smooth;
+  min-width: 0;
 }
 
 .messages {
