@@ -10,11 +10,20 @@
   <div class="app">
     <header class="header">
       <div class="header-inner">
-        <div class="logo">
-          <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-          </svg>
-          <span>Claude</span>
+        <div class="logo-group">
+          <button id="sidebarToggleBtn" class="btn-icon" aria-label="Toggle history" aria-expanded="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          <div class="logo">
+            <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+            <span>Claude</span>
+          </div>
         </div>
         <div class="header-actions">
           <button id="settingsBtn" class="btn-icon" aria-label="Settings" aria-expanded="false">
@@ -63,34 +72,43 @@
       </div>
     </div>
 
-    <main class="main">
-      <div id="messages" class="messages">
-        <div id="welcome" class="welcome">
-          <div class="welcome-glyph">&#9670;</div>
-          <h1>How can I help you today?</h1>
-          <p>Powered by Claude Opus 4 via the Anthropic API</p>
-        </div>
-      </div>
-    </main>
+    <div class="body">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">History</div>
+        <div class="sidebar-sessions" id="sessionList"></div>
+      </aside>
 
-    <footer class="footer">
-      <div class="input-shell">
-        <textarea
-          id="userInput"
-          class="input"
-          placeholder="Message Claude…"
-          rows="1"
-          autofocus
-        ></textarea>
-        <button id="sendBtn" class="btn-send" disabled aria-label="Send">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="19" x2="12" y2="5"/>
-            <polyline points="5 12 12 5 19 12"/>
-          </svg>
-        </button>
+      <div class="chat-area">
+        <main class="main">
+          <div id="messages" class="messages">
+            <div id="welcome" class="welcome">
+              <div class="welcome-glyph">&#9670;</div>
+              <h1>How can I help you today?</h1>
+              <p>Powered by Claude via the Anthropic API</p>
+            </div>
+          </div>
+        </main>
+
+        <footer class="footer">
+          <div class="input-shell">
+            <textarea
+              id="userInput"
+              class="input"
+              placeholder="Message Claude…"
+              rows="1"
+              autofocus
+            ></textarea>
+            <button id="sendBtn" class="btn-send" disabled aria-label="Send">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"/>
+                <polyline points="5 12 12 5 19 12"/>
+              </svg>
+            </button>
+          </div>
+          <p class="footer-note">Claude can make mistakes. Verify important information.</p>
+        </footer>
       </div>
-      <p class="footer-note">Claude can make mistakes. Verify important information.</p>
-    </footer>
+    </div>
   </div>
 
   <script src="app.js"></script>

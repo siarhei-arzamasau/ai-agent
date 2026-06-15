@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import path from 'path';
+import fs from 'fs';
+import { randomUUID } from 'crypto';
 
 const app = express();
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
@@ -12,6 +14,14 @@ app.use(express.static(path.join(process.cwd(), 'dist/public')));
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+interface Session {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
 }
 
 const ALLOWED_MODELS = new Set([
@@ -26,6 +36,81 @@ interface ChatSettings {
   temperature?: number;
   stopSequences?: string[];
 }
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const HISTORY_FILE = path.join(DATA_DIR, 'chat-history.json');
+
+function loadSessions(): Session[] {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) return [];
+    return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveSessions(sessions: Session[]): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+}
+
+app.get('/api/history', (req, res) => {
+  const sessions = loadSessions();
+  const excludeId = req.query.exclude as string | undefined;
+  const messages = sessions
+    .filter(s => s.id !== excludeId)
+    .flatMap(s => s.messages);
+  res.json(messages);
+});
+
+app.get('/api/sessions', (_req, res) => {
+  const sessions = loadSessions();
+  const list = sessions
+    .map(({ id, title, createdAt, updatedAt, messages }) => ({
+      id, title, createdAt, updatedAt, messageCount: messages.length,
+    }))
+    .reverse();
+  res.json(list);
+});
+
+app.get('/api/sessions/:id', (req, res) => {
+  const sessions = loadSessions();
+  const session = sessions.find(s => s.id === req.params.id);
+  if (!session) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json(session);
+});
+
+app.post('/api/sessions', (req, res) => {
+  const { messages } = req.body as { messages: ChatMessage[] };
+  const sessions = loadSessions();
+  const now = new Date().toISOString();
+  const firstUser = messages.find(m => m.role === 'user');
+  const title = firstUser ? firstUser.content.slice(0, 60) : 'New chat';
+  const session: Session = { id: randomUUID(), title, createdAt: now, updatedAt: now, messages };
+  sessions.push(session);
+  saveSessions(sessions);
+  res.json({ id: session.id });
+});
+
+app.patch('/api/sessions/:id', (req, res) => {
+  const { messages } = req.body as { messages: ChatMessage[] };
+  const sessions = loadSessions();
+  const idx = sessions.findIndex(s => s.id === req.params.id);
+  if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
+  sessions[idx].messages = messages;
+  sessions[idx].updatedAt = new Date().toISOString();
+  saveSessions(sessions);
+  res.json({ ok: true });
+});
+
+app.delete('/api/sessions/:id', (req, res) => {
+  const sessions = loadSessions();
+  const idx = sessions.findIndex(s => s.id === req.params.id);
+  if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
+  sessions.splice(idx, 1);
+  saveSessions(sessions);
+  res.json({ ok: true });
+});
 
 app.post('/api/chat', async (req, res) => {
   const { messages, settings = {} } = req.body as { messages: ChatMessage[]; settings?: ChatSettings };

@@ -3,6 +3,14 @@ interface Message {
   content: string;
 }
 
+interface SessionMeta {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
 interface Settings {
   model: string;
   maxTokens: number;
@@ -44,9 +52,27 @@ function renderMarkdown(raw: string): string {
   return s;
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString();
+}
+
 class Chat {
-  private history: Message[] = [];
+  private contextHistory: Message[] = []; // all previous sessions — sent to API, not displayed
+  private history: Message[] = [];        // current session — displayed and saved
+  private sessionId: string | null = null;
   private streaming = false;
+
+  // What gets sent to Claude — full context + current session
+  private get apiMessages(): Message[] {
+    return [...this.contextHistory, ...this.history];
+  }
 
   private messagesEl = document.getElementById('messages') as HTMLDivElement;
   private welcomeEl = document.getElementById('welcome') as HTMLDivElement;
@@ -64,9 +90,13 @@ class Chat {
   private tempHintEl = document.getElementById('tempHint') as HTMLDivElement;
   private stopSeqsEl = document.getElementById('stopSeqs') as HTMLInputElement;
 
+  private sidebarEl = document.getElementById('sidebar') as HTMLElement;
+  private sessionListEl = document.getElementById('sessionList') as HTMLElement;
+  private sidebarToggleBtn = document.getElementById('sidebarToggleBtn') as HTMLButtonElement;
+
   constructor() {
     this.sendBtn.addEventListener('click', () => this.send());
-    this.clearBtn.addEventListener('click', () => this.clear());
+    this.clearBtn.addEventListener('click', () => this.newChat());
 
     this.inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -91,6 +121,29 @@ class Chat {
       this.tempValEl.textContent = parseFloat(this.temperatureEl.value).toFixed(2);
     });
 
+    this.sidebarToggleBtn.addEventListener('click', () => this.toggleSidebar());
+
+    this.initContext();
+  }
+
+  private async initContext() {
+    await this.loadContext();
+    await this.loadSessions();
+  }
+
+  private async loadContext(excludeId?: string) {
+    try {
+      const url = excludeId ? `/api/history?exclude=${excludeId}` : '/api/history';
+      const res = await fetch(url);
+      this.contextHistory = await res.json();
+    } catch {
+      this.contextHistory = [];
+    }
+  }
+
+  private toggleSidebar() {
+    const collapsed = this.sidebarEl.classList.toggle('collapsed');
+    this.sidebarToggleBtn.setAttribute('aria-expanded', String(!collapsed));
   }
 
   private toggleSettings() {
@@ -143,25 +196,46 @@ class Chat {
     this.syncSendBtn();
   }
 
-  private clear() {
+  private async newChat() {
+    this.sessionId = null;
     this.history = [];
+    await this.loadContext(); // reload so just-saved session is included as context
+    this.renderHistory();
+    await this.refreshSessionList();
+    this.inputEl.focus();
+  }
+
+  private renderHistory() {
     this.messagesEl.innerHTML = '';
-    this.welcomeEl = document.createElement('div');
-    this.welcomeEl.id = 'welcome';
-    this.welcomeEl.className = 'welcome';
-    this.welcomeEl.innerHTML = `
-      <div class="welcome-glyph">&#9670;</div>
-      <h1>How can I help you today?</h1>
-      <p>Powered by Claude Opus 4 via the Anthropic API</p>
-    `;
-    this.messagesEl.appendChild(this.welcomeEl);
+    if (this.history.length === 0) {
+      const welcome = document.createElement('div');
+      welcome.id = 'welcome';
+      welcome.className = 'welcome';
+      welcome.innerHTML = `
+        <div class="welcome-glyph">&#9670;</div>
+        <h1>How can I help you today?</h1>
+        <p>Powered by Claude via the Anthropic API</p>
+      `;
+      this.messagesEl.appendChild(welcome);
+      this.welcomeEl = welcome;
+      return;
+    }
+    for (const msg of this.history) {
+      const bubble = this.addBubble(msg.role, false);
+      if (msg.role === 'user') {
+        bubble.textContent = msg.content;
+      } else {
+        bubble.innerHTML = renderMarkdown(msg.content);
+      }
+    }
+    this.scrollBottom();
   }
 
   private hideWelcome() {
     this.welcomeEl?.remove();
   }
 
-  private addBubble(role: 'user' | 'assistant'): HTMLElement {
+  private addBubble(role: 'user' | 'assistant', scroll = true): HTMLElement {
     this.hideWelcome();
 
     const row = document.createElement('div');
@@ -177,13 +251,120 @@ class Chat {
     }
 
     this.messagesEl.appendChild(row);
-    this.scrollBottom();
+    if (scroll) this.scrollBottom();
     return row.querySelector('.bubble') as HTMLElement;
   }
 
   private scrollBottom() {
     const main = document.querySelector('.main') as HTMLElement;
     main.scrollTop = main.scrollHeight;
+  }
+
+  private async loadSessions() {
+    try {
+      const res = await fetch('/api/sessions');
+      const sessions: SessionMeta[] = await res.json();
+      this.renderSessionList(sessions);
+    } catch {
+      // silently ignore — history unavailable
+    }
+  }
+
+  private async refreshSessionList() {
+    await this.loadSessions();
+  }
+
+  private renderSessionList(sessions: SessionMeta[]) {
+    this.sessionListEl.innerHTML = '';
+
+    if (sessions.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'session-empty';
+      empty.textContent = 'No history yet';
+      this.sessionListEl.appendChild(empty);
+      return;
+    }
+
+    for (const s of sessions) {
+      const item = document.createElement('div');
+      item.className = 'session-item' + (s.id === this.sessionId ? ' active' : '');
+
+      const info = document.createElement('div');
+      info.className = 'session-info';
+      info.innerHTML = `
+        <div class="session-title">${escapeHtml(s.title)}</div>
+        <div class="session-date">${formatDate(s.updatedAt)}</div>
+      `;
+      info.addEventListener('click', () => this.openSession(s.id));
+
+      const del = document.createElement('button');
+      del.className = 'session-delete';
+      del.setAttribute('aria-label', 'Delete session');
+      del.textContent = '×';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteSession(s.id);
+      });
+
+      item.appendChild(info);
+      item.appendChild(del);
+      this.sessionListEl.appendChild(item);
+    }
+  }
+
+  private async openSession(id: string) {
+    try {
+      const [sessionRes] = await Promise.all([
+        fetch(`/api/sessions/${id}`),
+        this.loadContext(id), // load all sessions except this one as background context
+      ]);
+      if (!sessionRes.ok) return;
+      const session = await sessionRes.json();
+      this.sessionId = id;
+      this.history = session.messages;
+      this.renderHistory();
+      await this.refreshSessionList();
+    } catch {
+      // ignore
+    }
+  }
+
+  private async saveSession() {
+    if (this.history.length === 0) return;
+    try {
+      if (this.sessionId) {
+        await fetch(`/api/sessions/${this.sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: this.history }),
+        });
+      } else {
+        const res = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: this.history }),
+        });
+        const data = await res.json();
+        this.sessionId = data.id;
+      }
+      await this.refreshSessionList();
+    } catch {
+      // ignore — save failure is non-fatal
+    }
+  }
+
+  private async deleteSession(id: string) {
+    try {
+      await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      if (this.sessionId === id) {
+        this.sessionId = null;
+        this.history = [];
+        this.renderHistory();
+      }
+      await this.refreshSessionList();
+    } catch {
+      // ignore
+    }
   }
 
   private async send() {
@@ -209,7 +390,7 @@ class Chat {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: this.history, settings: this.getSettings() }),
+        body: JSON.stringify({ messages: this.apiMessages, settings: this.getSettings() }),
       });
 
       if (!res.ok) {
@@ -262,6 +443,7 @@ class Chat {
 
       this.history.push({ role: 'assistant', content: accumulated });
       assistantBubble.innerHTML = renderMarkdown(accumulated);
+      await this.saveSession();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unexpected error';
       assistantBubble.textContent = msg;
