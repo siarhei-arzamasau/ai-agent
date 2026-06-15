@@ -16,12 +16,24 @@ interface ChatMessage {
   content: string;
 }
 
+interface BranchData {
+  id: string;
+  label: string;
+  createdAt: string;
+  messages: ChatMessage[];
+}
+
 interface Session {
   id: string;
   title: string;
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  strategy?: string;
+  slidingWindowSize?: number;
+  facts?: Record<string, string>;
+  branches?: BranchData[];
+  activeBranchId?: string;
 }
 
 const ALLOWED_MODELS = new Set([
@@ -39,14 +51,6 @@ interface ChatSettings {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const HISTORY_FILE = path.join(DATA_DIR, 'chat-history.json');
-const SUMMARIES_FILE = path.join(DATA_DIR, 'summaries.json');
-
-interface SessionSummary {
-  sessionId: string;
-  title: string;
-  createdAt: string;
-  summary: string;
-}
 
 function loadSessions(): Session[] {
   try {
@@ -62,41 +66,20 @@ function saveSessions(sessions: Session[]): void {
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
 }
 
-function loadSummaries(): SessionSummary[] {
-  try {
-    if (!fs.existsSync(SUMMARIES_FILE)) return [];
-    return JSON.parse(fs.readFileSync(SUMMARIES_FILE, 'utf-8'));
-  } catch {
-    return [];
-  }
-}
-
-function saveSummaries(summaries: SessionSummary[]): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(SUMMARIES_FILE, JSON.stringify(summaries, null, 2), 'utf-8');
-}
-
 app.get('/api/history', (req, res) => {
+  const sessions = loadSessions();
   const excludeId = req.query.exclude as string | undefined;
-  const summaries = loadSummaries().filter(s => s.sessionId !== excludeId);
-
-  if (summaries.length === 0) {
-    res.json({ system: '' });
-    return;
-  }
-
-  const parts = summaries.map(s => {
-    const date = new Date(s.createdAt).toLocaleDateString();
-    return `[${date} — ${s.title}]\n${s.summary}`;
-  });
-  res.json({ system: 'Summaries of previous conversations:\n\n' + parts.join('\n\n') });
+  const messages = sessions
+    .filter(s => s.id !== excludeId)
+    .flatMap(s => s.messages);
+  res.json(messages);
 });
 
 app.get('/api/sessions', (_req, res) => {
   const sessions = loadSessions();
   const list = sessions
-    .map(({ id, title, createdAt, updatedAt, messages }) => ({
-      id, title, createdAt, updatedAt, messageCount: messages.length,
+    .map(({ id, title, createdAt, updatedAt, messages, strategy, slidingWindowSize }) => ({
+      id, title, createdAt, updatedAt, messageCount: messages.length, strategy, slidingWindowSize,
     }))
     .reverse();
   res.json(list);
@@ -110,23 +93,28 @@ app.get('/api/sessions/:id', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { messages } = req.body as { messages: ChatMessage[] };
+  const { messages, strategy, slidingWindowSize, facts, branches, activeBranchId } = req.body as { messages: ChatMessage[]; strategy?: string; slidingWindowSize?: number; facts?: Record<string, string>; branches?: BranchData[]; activeBranchId?: string };
   const sessions = loadSessions();
   const now = new Date().toISOString();
   const firstUser = messages.find(m => m.role === 'user');
   const title = firstUser ? firstUser.content.slice(0, 60) : 'New chat';
-  const session: Session = { id: randomUUID(), title, createdAt: now, updatedAt: now, messages };
+  const session: Session = { id: randomUUID(), title, createdAt: now, updatedAt: now, messages, strategy, slidingWindowSize, facts, branches, activeBranchId };
   sessions.push(session);
   saveSessions(sessions);
   res.json({ id: session.id });
 });
 
 app.patch('/api/sessions/:id', (req, res) => {
-  const { messages } = req.body as { messages: ChatMessage[] };
+  const { messages, strategy, slidingWindowSize, facts, branches, activeBranchId } = req.body as { messages: ChatMessage[]; strategy?: string; slidingWindowSize?: number; facts?: Record<string, string>; branches?: BranchData[]; activeBranchId?: string };
   const sessions = loadSessions();
   const idx = sessions.findIndex(s => s.id === req.params.id);
   if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
   sessions[idx].messages = messages;
+  sessions[idx].strategy = strategy;
+  sessions[idx].slidingWindowSize = slidingWindowSize;
+  sessions[idx].facts = facts;
+  sessions[idx].branches = branches;
+  sessions[idx].activeBranchId = activeBranchId;
   sessions[idx].updatedAt = new Date().toISOString();
   saveSessions(sessions);
   res.json({ ok: true });
@@ -138,48 +126,51 @@ app.delete('/api/sessions/:id', (req, res) => {
   if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
   sessions.splice(idx, 1);
   saveSessions(sessions);
-
-  // Remove associated summary too
-  const summaries = loadSummaries().filter(s => s.sessionId !== req.params.id);
-  saveSummaries(summaries);
-
   res.json({ ok: true });
 });
 
-app.post('/api/sessions/:id/summarize', async (req, res) => {
+app.post('/api/sessions/:id/extract-facts', async (req, res) => {
+  const { userMessage, assistantMessage } = req.body as { userMessage: string; assistantMessage: string };
   const sessions = loadSessions();
-  const session = sessions.find(s => s.id === req.params.id);
-  if (!session) { res.status(404).json({ error: 'Not found' }); return; }
-  if (session.messages.length === 0) { res.json({ summary: '' }); return; }
+  const idx = sessions.findIndex(s => s.id === req.params.id);
+  if (idx === -1) { res.status(404).json({ error: 'Not found' }); return; }
+
+  const currentFacts = sessions[idx].facts ?? {};
 
   try {
-    const transcript = session.messages
-      .map(m => `${m.role.toUpperCase()}: ${m.content}`)
-      .join('\n\n');
-
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
+      max_tokens: 512,
       messages: [{
         role: 'user',
-        content: `Summarize this conversation in 2–4 concise sentences. Focus on key topics discussed, decisions made, and outcomes. Start directly with the summary.\n\n${transcript}`,
+        content: `You maintain a key-value store of important facts from a conversation. Extract details like names, goals, preferences, constraints, insights, decisions, solutions, ideas, and expectations.
+
+Current facts:
+${JSON.stringify(currentFacts)}
+
+Latest exchange:
+USER: ${userMessage}
+ASSISTANT: ${assistantMessage}
+
+Update the facts: add new ones, update changed values, keep the rest. Keys must be concise snake_case. Values must be one line.
+Respond with ONLY a JSON object — no markdown, no explanation.`,
       }],
     });
 
-    const summary = response.content[0].type === 'text' ? response.content[0].text : '';
+    const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+    let facts: Record<string, string> = {};
+    try {
+      const match = raw.replace(/```(?:json)?\n?|```/g, '').match(/\{[\s\S]*\}/);
+      if (match) facts = JSON.parse(match[0]);
+    } catch { facts = currentFacts; }
 
-    const summaries = loadSummaries();
-    const existingIdx = summaries.findIndex(s => s.sessionId === session.id);
-    const entry: SessionSummary = { sessionId: session.id, title: session.title, createdAt: session.createdAt, summary };
-    if (existingIdx >= 0) summaries[existingIdx] = entry;
-    else summaries.push(entry);
-    saveSummaries(summaries);
-
-    console.log(`[summarize] session ${session.id} done`);
-    res.json({ summary });
+    sessions[idx].facts = facts;
+    saveSessions(sessions);
+    console.log(`[facts] session ${req.params.id} updated (${Object.keys(facts).length} facts)`);
+    res.json({ facts });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[summarize] error:', message);
+    console.error('[facts] error:', message);
     res.status(500).json({ error: message });
   }
 });
