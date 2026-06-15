@@ -690,9 +690,18 @@ body {
   cursor: not-allowed;
 }
 
+.session-stats {
+  max-width: var(--max-w);
+  margin: 5px auto 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .footer-note {
   max-width: var(--max-w);
-  margin: 6px auto 0;
+  margin: 4px auto 0;
   font-size: 11px;
   color: var(--text-placeholder);
   text-align: center;
