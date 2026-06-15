@@ -69,6 +69,9 @@ class Chat {
   private sessionId: string | null = null;
   private streaming = false;
 
+  private lastInputTokens = 0;   // input tokens from the previous request in this session
+  private sessionOutputTokens = 0; // accumulated output tokens for this session
+
   // What gets sent to Claude — full context + current session
   private get apiMessages(): Message[] {
     return [...this.contextHistory, ...this.history];
@@ -93,6 +96,7 @@ class Chat {
   private sidebarEl = document.getElementById('sidebar') as HTMLElement;
   private sessionListEl = document.getElementById('sessionList') as HTMLElement;
   private sidebarToggleBtn = document.getElementById('sidebarToggleBtn') as HTMLButtonElement;
+  private sessionStatsEl = document.getElementById('sessionStats') as HTMLElement;
 
   constructor() {
     this.sendBtn.addEventListener('click', () => this.send());
@@ -199,10 +203,23 @@ class Chat {
   private async newChat() {
     this.sessionId = null;
     this.history = [];
+    this.lastInputTokens = 0;
+    this.sessionOutputTokens = 0;
+    this.updateSessionStats();
     await this.loadContext(); // reload so just-saved session is included as context
     this.renderHistory();
     await this.refreshSessionList();
     this.inputEl.focus();
+  }
+
+  private updateSessionStats() {
+    if (this.lastInputTokens === 0 && this.sessionOutputTokens === 0) {
+      this.sessionStatsEl.hidden = true;
+      return;
+    }
+    this.sessionStatsEl.hidden = false;
+    this.sessionStatsEl.textContent =
+      `Session: ${this.sessionOutputTokens.toLocaleString()} out total · ${this.lastInputTokens.toLocaleString()} ctx`;
   }
 
   private renderHistory() {
@@ -453,8 +470,16 @@ class Chat {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
       const timeEl = document.createElement('div');
       timeEl.className = 'bubble-time';
-      const tokenPart = usage ? ` · ${usage.input} in / ${usage.output} out tokens` : '';
-      timeEl.textContent = `${elapsed}s${tokenPart}`;
+      if (usage) {
+        const reqIn = usage.input - this.lastInputTokens;
+        this.lastInputTokens = usage.input;
+        this.sessionOutputTokens += usage.output;
+        this.updateSessionStats();
+        timeEl.textContent =
+          `${elapsed}s · req: ${reqIn.toLocaleString()} in / ${usage.output.toLocaleString()} out · ctx: ${usage.input.toLocaleString()} total`;
+      } else {
+        timeEl.textContent = `${elapsed}s`;
+      }
       assistantBubble.appendChild(timeEl);
 
       assistantBubble.classList.remove('streaming');
