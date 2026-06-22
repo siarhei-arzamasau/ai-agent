@@ -172,12 +172,18 @@ class Chat {
   private factsPanelEl = document.getElementById('factsPanel') as HTMLElement;
   private factsListEl = document.getElementById('factsList') as HTMLElement;
 
+  private memoryPanelEl = document.getElementById('memoryPanel') as HTMLElement;
+  private memoryCollapseBtnEl = document.getElementById('memoryCollapseBtn') as HTMLButtonElement;
   private shortMemoryListEl = document.getElementById('shortMemoryList') as HTMLElement;
   private workingMemoryListEl = document.getElementById('workingMemoryList') as HTMLElement;
   private longMemoryListEl = document.getElementById('longMemoryList') as HTMLElement;
 
+  private profilesPanelEl = document.getElementById('profilesPanel') as HTMLElement;
+  private profilesCollapseBtnEl = document.getElementById('profilesCollapseBtn') as HTMLButtonElement;
   private profilesListEl = document.getElementById('profilesList') as HTMLElement;
 
+  private invariantsPanelEl = document.getElementById('invariantsPanel') as HTMLElement;
+  private invariantsCollapseBtnEl = document.getElementById('invariantsCollapseBtn') as HTMLButtonElement;
   private invariantsListEl = document.getElementById('invariantsList') as HTMLElement;
 
   private taskBarEl = document.getElementById('taskBar') as HTMLElement;
@@ -222,6 +228,10 @@ class Chat {
     });
 
     this.sidebarToggleBtn.addEventListener('click', () => this.toggleSidebar());
+
+    this.invariantsCollapseBtnEl.addEventListener('click', () => this.togglePanelCollapse(this.invariantsPanelEl, this.invariantsCollapseBtnEl));
+    this.profilesCollapseBtnEl.addEventListener('click', () => this.togglePanelCollapse(this.profilesPanelEl, this.profilesCollapseBtnEl));
+    this.memoryCollapseBtnEl.addEventListener('click', () => this.togglePanelCollapse(this.memoryPanelEl, this.memoryCollapseBtnEl));
 
     this.strategyToggleEl.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('.strategy-btn') as HTMLButtonElement | null;
@@ -290,6 +300,12 @@ class Chat {
   private toggleSidebar() {
     const collapsed = this.sidebarEl.classList.toggle('collapsed');
     this.sidebarToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+  }
+
+  private togglePanelCollapse(panelEl: HTMLElement, btnEl: HTMLButtonElement) {
+    const collapsed = panelEl.classList.toggle('collapsed');
+    btnEl.classList.toggle('collapsed', collapsed);
+    btnEl.setAttribute('aria-expanded', String(!collapsed));
   }
 
   private toggleSettings() {
