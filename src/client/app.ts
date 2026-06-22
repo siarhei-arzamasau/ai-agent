@@ -612,7 +612,7 @@ class Chat {
       this.taskHintEl.textContent = 'Task complete';
     } else {
       const next = TASK_STAGES[TASK_STAGES.indexOf(task.state) + 1];
-      this.taskHintEl.textContent = `Reply to approve & move to ${TASK_STAGE_LABELS[next]}, or describe changes to revise this stage.`;
+      this.taskHintEl.textContent = `Reply to approve & move to ${TASK_STAGE_LABELS[next]}, describe changes to revise, or type “стоп” to stop.`;
     }
   }
 
@@ -620,6 +620,12 @@ class Chat {
     // \b doesn't work with Cyrillic in JS regex (non-word chars by default) — use an
     // explicit lookahead boundary instead so "да, давай дальше" matches correctly.
     return /^(да|ок|окей|хорошо|подходит|годится|норм|approve(?:d)?|ok(?:ay)?|good|great|fine|works|sounds good|looks good|go ahead|proceed|next|continue|yes)(?=[\s,.!?:;]|$)/i.test(text.trim());
+  }
+
+  private isStopWord(text: string): boolean {
+    // Same Cyrillic-safe boundary as isApproval. The lookahead excludes "-" on
+    // purpose so "стоп-кран нужен" (a revision, not a stop) doesn't match.
+    return /^(стоп|стой|отмена|отмени|отменить|прекрати|прекратить|хватит|stop|cancel|abort|quit|halt)(?=[\s,.!?:;]|$)/i.test(text.trim());
   }
 
   private buildStageInstructions(task: ActiveTask, stage: TaskStage, feedback?: string): string {
@@ -686,6 +692,13 @@ class Chat {
     const task = this.activeTask;
     if (!task) return;
 
+    // A stop word aborts the whole task workflow. Checked before approval/revision
+    // so "стоп" never gets mistaken for revision feedback and sent to the model.
+    if (this.isStopWord(text)) {
+      this.stopTask();
+      return;
+    }
+
     if (this.isApproval(text)) {
       const next = TASK_STAGES[TASK_STAGES.indexOf(task.state) + 1];
       task.state = next;
@@ -694,6 +707,15 @@ class Chat {
     } else {
       await this.runTaskStage(text, text);
     }
+  }
+
+  private stopTask(): void {
+    const task = this.activeTask;
+    if (!task) return;
+    const stageLabel = TASK_STAGE_LABELS[task.state];
+    this.activeTask = null;
+    this.renderTaskStatus();
+    this.addSystemNote(`Task stopped at the ${stageLabel} stage: "${task.description}". Back to a normal conversation.`);
   }
 
   private async handleMemoryCommand(command: string, content: string): Promise<void> {
