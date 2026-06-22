@@ -99,6 +99,11 @@
         </div>
       </aside>
 
+      <aside class="invariants-panel" id="invariantsPanel">
+        <div class="invariants-header">Invariants <span class="memory-hint">global, always enforced</span></div>
+        <div class="memory-list" id="invariantsList"></div>
+      </aside>
+
       <aside class="profiles-panel" id="profilesPanel">
         <div class="profiles-header">Profiles</div>
         <div class="profiles-list" id="profilesList"></div>
@@ -162,7 +167,7 @@
             </button>
           </div>
           <div id="sessionStats" class="session-stats" hidden></div>
-          <p class="footer-note">Claude can make mistakes. Verify important information. · /short-memory, /work-memory, /long-memory &lt;text&gt; · /create-profile &lt;name&gt; &lt;definition&gt;, /profile, /switch-profile &lt;name&gt; · /task &lt;description&gt;</p>
+          <p class="footer-note">Claude can make mistakes. Verify important information. · /short-memory, /work-memory, /long-memory &lt;text&gt; · /create-profile &lt;name&gt; &lt;definition&gt;, /profile, /switch-profile &lt;name&gt; · /task &lt;description&gt; · /add-invariant &lt;text&gt;, /invariants</p>
         </footer>
       </div>
     </div>

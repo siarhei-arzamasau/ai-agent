@@ -663,6 +663,34 @@ body {
   color: var(--error);
 }
 
+/* ── Invariants panel ── */
+
+.invariants-panel {
+  width: 220px;
+  flex-shrink: 0;
+  order: -1;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.invariants-header {
+  padding: 12px 14px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.invariants-panel .memory-list {
+  padding: 10px 10px 6px;
+}
+
 /* ── Profiles panel ── */
 
 .profiles-panel {

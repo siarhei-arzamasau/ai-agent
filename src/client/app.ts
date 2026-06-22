@@ -126,6 +126,10 @@ class Chat {
   private profiles: Profile[] = [];
   private activeProfileId: string | null = null;
 
+  // Invariants: global hard constraints, applied to every dialog and enforced
+  // in the model's reasoning (it must refuse solutions that violate them).
+  private invariants: string[] = [];
+
   // Task FSM: one active task per session, walking planning → execution → validation → done.
   private activeTask: ActiveTask | null = null;
 
@@ -173,6 +177,8 @@ class Chat {
   private longMemoryListEl = document.getElementById('longMemoryList') as HTMLElement;
 
   private profilesListEl = document.getElementById('profilesList') as HTMLElement;
+
+  private invariantsListEl = document.getElementById('invariantsList') as HTMLElement;
 
   private taskBarEl = document.getElementById('taskBar') as HTMLElement;
   private taskStageBadgeEl = document.getElementById('taskStageBadge') as HTMLElement;
@@ -244,6 +250,7 @@ class Chat {
     await this.loadSessions();
     await this.loadLongTermMemory();
     await this.loadProfiles();
+    await this.loadInvariants();
   }
 
   private async loadLongTermMemory() {
@@ -266,6 +273,17 @@ class Chat {
       this.renderProfilesPanel();
     } catch {
       // silently ignore — profiles unavailable
+    }
+  }
+
+  private async loadInvariants() {
+    try {
+      const res = await fetch('/api/invariants');
+      const data = await res.json();
+      this.invariants = data.entries ?? [];
+      this.renderInvariantsPanel();
+    } catch {
+      // silently ignore — invariants unavailable
     }
   }
 
@@ -423,6 +441,21 @@ class Chat {
       const data = await res.json();
       this.longTermMemory = data.entries ?? this.longTermMemory;
       this.renderMemoryPanel();
+    } catch {
+      // ignore
+    }
+  }
+
+  private renderInvariantsPanel() {
+    this.renderMemoryList(this.invariantsListEl, this.invariants, '/add-invariant', (i) => this.deleteInvariant(i));
+  }
+
+  private async deleteInvariant(index: number) {
+    try {
+      const res = await fetch(`/api/invariants/${index}`, { method: 'DELETE' });
+      const data = await res.json();
+      this.invariants = data.entries ?? this.invariants;
+      this.renderInvariantsPanel();
     } catch {
       // ignore
     }
@@ -676,8 +709,46 @@ class Chat {
     this.renderMemoryPanel();
   }
 
+  private async handleInvariantCommand(command: string, content: string): Promise<void> {
+    if (command === 'invariants') {
+      if (this.invariants.length === 0) {
+        this.addSystemNote('No invariants defined. Use /add-invariant <text>.');
+      } else {
+        this.addSystemNote('Invariants:\n' + this.invariants.map((e, i) => `${i + 1}. ${e}`).join('\n'));
+      }
+      return;
+    }
+    // command === 'add-invariant'
+    if (!content) {
+      this.addSystemNote('Usage: /add-invariant <text>');
+      return;
+    }
+    try {
+      const res = await fetch('/api/invariants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry: content }),
+      });
+      const data = await res.json();
+      this.invariants = data.entries ?? this.invariants;
+      this.renderInvariantsPanel();
+      this.addSystemNote(`Added invariant: "${content}"`);
+    } catch {
+      this.addSystemNote('Failed to save invariant');
+    }
+  }
+
   private buildSystemPrompt(): string {
     const parts: string[] = [];
+
+    if (this.invariants.length > 0) {
+      parts.push(
+        'INVARIANTS — hard constraints that must hold at all times, across this entire conversation:\n' +
+        this.invariants.map(e => `- ${e}`).join('\n') +
+        '\n\nBefore answering, explicitly check your reasoning and any proposed solution against every invariant above. ' +
+        'If a solution would violate one or more invariants, do not propose it — state which invariant it violates and propose an alternative that satisfies all of them instead.'
+      );
+    }
 
     const activeProfile = this.profiles.find(p => p.id === this.activeProfileId);
     if (activeProfile) {
@@ -1054,7 +1125,7 @@ class Chat {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
 
-    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory|create-profile|profile|switch-profile|task)(?:\s+([\s\S]+))?$/);
+    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory|create-profile|profile|switch-profile|task|add-invariant|invariants)(?:\s+([\s\S]+))?$/);
     if (cmdMatch) {
       this.inputEl.value = '';
       this.inputEl.style.height = 'auto';
@@ -1065,6 +1136,8 @@ class Chat {
         await this.handleProfileCommand(command, content);
       } else if (command === 'task') {
         await this.handleTaskCommand(content);
+      } else if (command === 'add-invariant' || command === 'invariants') {
+        await this.handleInvariantCommand(command, content);
       } else {
         await this.handleMemoryCommand(command, content);
       }

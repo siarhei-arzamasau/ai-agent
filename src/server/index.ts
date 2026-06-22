@@ -66,6 +66,7 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const HISTORY_FILE = path.join(DATA_DIR, 'chat-history.json');
 const LONG_TERM_MEMORY_FILE = path.join(DATA_DIR, 'long-term-memory.json');
 const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
+const INVARIANTS_FILE = path.join(DATA_DIR, 'invariants.json');
 
 function loadSessions(): Session[] {
   try {
@@ -107,6 +108,20 @@ function loadProfiles(): ProfilesData {
 function saveProfiles(data: ProfilesData): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(PROFILES_FILE, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function loadInvariants(): string[] {
+  try {
+    if (!fs.existsSync(INVARIANTS_FILE)) return [];
+    return JSON.parse(fs.readFileSync(INVARIANTS_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveInvariants(entries: string[]): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(INVARIANTS_FILE, JSON.stringify(entries, null, 2), 'utf-8');
 }
 
 app.get('/api/history', (req, res) => {
@@ -192,6 +207,28 @@ app.delete('/api/long-term-memory/:index', (req, res) => {
   if (isNaN(index) || index < 0 || index >= entries.length) { res.status(404).json({ error: 'Not found' }); return; }
   entries.splice(index, 1);
   saveLongTermMemory(entries);
+  res.json({ entries });
+});
+
+app.get('/api/invariants', (_req, res) => {
+  res.json({ entries: loadInvariants() });
+});
+
+app.post('/api/invariants', (req, res) => {
+  const { entry } = req.body as { entry: string };
+  if (!entry || !entry.trim()) { res.status(400).json({ error: 'entry is required' }); return; }
+  const entries = loadInvariants();
+  entries.push(entry.trim());
+  saveInvariants(entries);
+  res.json({ entries });
+});
+
+app.delete('/api/invariants/:index', (req, res) => {
+  const index = parseInt(req.params.index, 10);
+  const entries = loadInvariants();
+  if (isNaN(index) || index < 0 || index >= entries.length) { res.status(404).json({ error: 'Not found' }); return; }
+  entries.splice(index, 1);
+  saveInvariants(entries);
   res.json({ entries });
 });
 
