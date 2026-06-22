@@ -27,6 +27,22 @@ interface Profile {
   createdAt: string;
 }
 
+type TaskStage = 'planning' | 'execution' | 'validation' | 'done';
+
+interface ActiveTask {
+  description: string;
+  state: TaskStage;
+  outputs: Partial<Record<Exclude<TaskStage, 'done'>, string>>;
+}
+
+const TASK_STAGES: TaskStage[] = ['planning', 'execution', 'validation', 'done'];
+const TASK_STAGE_LABELS: Record<TaskStage, string> = {
+  planning: 'Planning',
+  execution: 'Execution',
+  validation: 'Validation',
+  done: 'Done',
+};
+
 interface Settings {
   model: string;
   maxTokens: number;
@@ -110,6 +126,9 @@ class Chat {
   private profiles: Profile[] = [];
   private activeProfileId: string | null = null;
 
+  // Task FSM: one active task per session, walking planning → execution → validation → done.
+  private activeTask: ActiveTask | null = null;
+
   private lastInputTokens = 0;   // input tokens from the previous request in this session
   private sessionOutputTokens = 0; // accumulated output tokens for this session
 
@@ -154,6 +173,11 @@ class Chat {
   private longMemoryListEl = document.getElementById('longMemoryList') as HTMLElement;
 
   private profilesListEl = document.getElementById('profilesList') as HTMLElement;
+
+  private taskBarEl = document.getElementById('taskBar') as HTMLElement;
+  private taskStageBadgeEl = document.getElementById('taskStageBadge') as HTMLElement;
+  private taskDescEl = document.getElementById('taskDesc') as HTMLElement;
+  private taskHintEl = document.getElementById('taskHint') as HTMLElement;
 
   private branchBarEl = document.getElementById('branchBar') as HTMLElement;
   private branchTabsEl = document.getElementById('branchTabs') as HTMLElement;
@@ -308,8 +332,10 @@ class Chat {
     this.activeBranchId = null;
     this.shortMemory = [];
     this.workingMemory = [];
+    this.activeTask = null;
     this.renderFacts();
     this.renderMemoryPanel();
+    this.renderTaskStatus();
     this.renderBranchTabs();
     this.lastInputTokens = 0;
     this.sessionOutputTokens = 0;
@@ -523,6 +549,104 @@ class Chat {
     this.scrollBottom();
   }
 
+  private renderTaskStatus() {
+    const task = this.activeTask;
+    if (!task) {
+      this.taskBarEl.classList.remove('visible');
+      return;
+    }
+    this.taskBarEl.classList.add('visible');
+    const idx = TASK_STAGES.indexOf(task.state) + 1;
+    this.taskStageBadgeEl.textContent = `Stage ${idx}/4 · ${TASK_STAGE_LABELS[task.state]}`;
+    this.taskDescEl.textContent = task.description;
+    if (task.state === 'done') {
+      this.taskHintEl.textContent = 'Task complete';
+    } else {
+      const next = TASK_STAGES[TASK_STAGES.indexOf(task.state) + 1];
+      this.taskHintEl.textContent = `Reply to approve & move to ${TASK_STAGE_LABELS[next]}, or describe changes to revise this stage.`;
+    }
+  }
+
+  private isApproval(text: string): boolean {
+    // \b doesn't work with Cyrillic in JS regex (non-word chars by default) — use an
+    // explicit lookahead boundary instead so "да, давай дальше" matches correctly.
+    return /^(да|ок|окей|хорошо|подходит|годится|норм|approve(?:d)?|ok(?:ay)?|good|great|fine|works|sounds good|looks good|go ahead|proceed|next|continue|yes)(?=[\s,.!?:;]|$)/i.test(text.trim());
+  }
+
+  private buildStageInstructions(task: ActiveTask, stage: TaskStage, feedback?: string): string {
+    const idx = TASK_STAGES.indexOf(stage) + 1;
+    const lines = [`Task workflow stage ${idx}/4: ${TASK_STAGE_LABELS[stage].toUpperCase()}.\nTask: "${task.description}"`];
+
+    if (task.outputs.planning && stage !== 'planning') {
+      lines.push(`Plan (stage 1 — planning):\n${task.outputs.planning}`);
+    }
+    if (task.outputs.execution && (stage === 'validation' || stage === 'done')) {
+      lines.push(`Deliverable (stage 2 — execution):\n${task.outputs.execution}`);
+    }
+    if (task.outputs.validation && stage === 'done') {
+      lines.push(`Validation review (stage 3 — validation):\n${task.outputs.validation}`);
+    }
+
+    if (feedback) {
+      const previous = stage === 'done' ? '' : task.outputs[stage] ?? '';
+      lines.push(`The user reviewed your previous response for this stage and requested changes:\n"${feedback}"\n\nPrevious response for this stage:\n${previous}\n\nRevise your response for this stage accordingly.`);
+    } else {
+      switch (stage) {
+        case 'planning':
+          lines.push('Produce a concise plan: break the task into concrete steps, the approach you will take, and what "done" should look like. Do not execute the task yet — only plan it.');
+          break;
+        case 'execution':
+          lines.push('Execute the approved plan and produce the actual deliverable for the task.');
+          break;
+        case 'validation':
+          lines.push('Critically validate the deliverable against the task and the plan. List concrete gaps, errors or missing pieces, or state explicitly that it fully satisfies the task.');
+          break;
+        case 'done':
+          lines.push('The user approved the validation. Provide the final, consolidated deliverable for the task as your closing response.');
+          break;
+      }
+    }
+    return lines.join('\n\n');
+  }
+
+  private async runTaskStage(userText: string, feedback?: string): Promise<void> {
+    const task = this.activeTask;
+    if (!task) return;
+    const stage = task.state;
+    const stageLabel = `Stage ${TASK_STAGES.indexOf(stage) + 1}/4 · ${TASK_STAGE_LABELS[stage]}`;
+    const extraSystem = this.buildStageInstructions(task, stage, feedback);
+
+    const output = await this.sendMessage(userText, { stageLabel, extraSystem });
+
+    if (!output) return; // request failed — stay on the current stage
+    if (stage !== 'done') task.outputs[stage] = output;
+    this.renderTaskStatus();
+  }
+
+  private async handleTaskCommand(description: string): Promise<void> {
+    if (!description) {
+      this.addSystemNote('Usage: /task <description>');
+      return;
+    }
+    this.activeTask = { description, state: 'planning', outputs: {} };
+    this.renderTaskStatus();
+    await this.runTaskStage(description);
+  }
+
+  private async handleTaskResponse(text: string): Promise<void> {
+    const task = this.activeTask;
+    if (!task) return;
+
+    if (this.isApproval(text)) {
+      const next = TASK_STAGES[TASK_STAGES.indexOf(task.state) + 1];
+      task.state = next;
+      this.renderTaskStatus();
+      await this.runTaskStage(text);
+    } else {
+      await this.runTaskStage(text, text);
+    }
+  }
+
   private async handleMemoryCommand(command: string, content: string): Promise<void> {
     if (!content) {
       this.addSystemNote(`Usage: /${command} <text>`);
@@ -617,16 +741,20 @@ class Chat {
     this.welcomeEl?.remove();
   }
 
-  private addBubble(role: 'user' | 'assistant', scroll = true): HTMLElement {
+  private addBubble(role: 'user' | 'assistant', scroll = true, stageLabel?: string): HTMLElement {
     this.hideWelcome();
 
     const row = document.createElement('div');
     row.className = `message message-${role}`;
 
     if (role === 'assistant') {
+      const labelHtml = stageLabel ? `<div class="bubble-stage-label">${escapeHtml(stageLabel)}</div>` : '';
       row.innerHTML = `
         <div class="avatar avatar-assistant">&#9670;</div>
-        <div class="bubble bubble-assistant"></div>
+        <div class="assistant-col">
+          ${labelHtml}
+          <div class="bubble bubble-assistant"></div>
+        </div>
       `;
     } else {
       row.innerHTML = `<div class="bubble bubble-user"></div>`;
@@ -710,6 +838,7 @@ class Chat {
       this.activeBranchId = session.activeBranchId ?? null;
       this.workingMemory = session.workingMemory ?? [];
       this.shortMemory = []; // short-term memory never persists across dialogs
+      this.activeTask = null; // task FSM is ephemeral, never persisted
       if (this.activeBranchId) {
         const active = this.branches.find(b => b.id === this.activeBranchId);
         this.history = active ? [...active.messages] : [...session.messages];
@@ -718,6 +847,7 @@ class Chat {
       }
       this.renderFacts();
       this.renderMemoryPanel();
+      this.renderTaskStatus();
       this.renderBranchTabs();
       this.updateStrategyUI();
       this.renderHistory();
@@ -924,7 +1054,7 @@ class Chat {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
 
-    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory|create-profile|profile|switch-profile)(?:\s+([\s\S]+))?$/);
+    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory|create-profile|profile|switch-profile|task)(?:\s+([\s\S]+))?$/);
     if (cmdMatch) {
       this.inputEl.value = '';
       this.inputEl.style.height = 'auto';
@@ -933,21 +1063,34 @@ class Chat {
       const content = (cmdMatch[2] ?? '').trim();
       if (command === 'create-profile' || command === 'profile' || command === 'switch-profile') {
         await this.handleProfileCommand(command, content);
+      } else if (command === 'task') {
+        await this.handleTaskCommand(content);
       } else {
         await this.handleMemoryCommand(command, content);
       }
       return;
     }
 
+    this.inputEl.value = '';
+    this.inputEl.style.height = 'auto';
+    this.syncSendBtn();
+
+    if (this.activeTask && this.activeTask.state !== 'done') {
+      await this.handleTaskResponse(text);
+      return;
+    }
+
+    await this.sendMessage(text);
+  }
+
+  private async sendMessage(text: string, opts: { stageLabel?: string; extraSystem?: string } = {}): Promise<string> {
     this.history.push({ role: 'user', content: text });
     const userBubble = this.addBubble('user');
     userBubble.textContent = text;
 
-    this.inputEl.value = '';
-    this.inputEl.style.height = 'auto';
     this.setStreaming(true);
 
-    const assistantBubble = this.addBubble('assistant');
+    const assistantBubble = this.addBubble('assistant', true, opts.stageLabel);
     assistantBubble.classList.add('streaming');
 
     let accumulated = '';
@@ -955,7 +1098,8 @@ class Chat {
     const startTime = Date.now();
 
     try {
-      const system = this.buildSystemPrompt();
+      const baseSystem = this.buildSystemPrompt();
+      const system = opts.extraSystem ? [baseSystem, opts.extraSystem].filter(Boolean).join('\n\n') : baseSystem;
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -1046,6 +1190,7 @@ class Chat {
       assistantBubble.textContent = msg;
       assistantBubble.classList.add('error');
       this.history.pop(); // remove user message that failed
+      accumulated = '';
     } finally {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
       const timeEl = document.createElement('div');
@@ -1066,6 +1211,8 @@ class Chat {
       this.setStreaming(false);
       this.inputEl.focus();
     }
+
+    return accumulated;
   }
 }
 

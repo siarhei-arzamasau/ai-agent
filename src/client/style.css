@@ -222,6 +222,58 @@ body {
   color: var(--error);
 }
 
+/* ── Task bar ── */
+
+.task-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.task-bar.visible {
+  display: flex;
+}
+
+.task-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.task-stage-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  border-radius: var(--radius-xs);
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.task-desc {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-bar-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* ── Branch bar ── */
 
 .branch-bar {
@@ -1116,6 +1168,22 @@ body {
   background: var(--accent-light);
   color: var(--accent);
   font-weight: 700;
+}
+
+.assistant-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bubble-stage-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 2px;
 }
 
 .bubble {

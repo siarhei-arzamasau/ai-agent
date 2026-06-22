@@ -121,6 +121,14 @@
       </aside>
 
       <div class="chat-area">
+        <div class="task-bar" id="taskBar">
+          <div class="task-bar-info">
+            <span class="task-stage-badge" id="taskStageBadge"></span>
+            <span class="task-desc" id="taskDesc"></span>
+          </div>
+          <div class="task-bar-hint" id="taskHint"></div>
+        </div>
+
         <div class="branch-bar" id="branchBar">
           <div class="branch-tabs" id="branchTabs"></div>
           <button id="createBranchBtn" class="btn-branch">+ Branch</button>
@@ -154,7 +162,7 @@
             </button>
           </div>
           <div id="sessionStats" class="session-stats" hidden></div>
-          <p class="footer-note">Claude can make mistakes. Verify important information. · /short-memory, /work-memory, /long-memory &lt;text&gt; · /create-profile &lt;name&gt; &lt;definition&gt;, /profile, /switch-profile &lt;name&gt;</p>
+          <p class="footer-note">Claude can make mistakes. Verify important information. · /short-memory, /work-memory, /long-memory &lt;text&gt; · /create-profile &lt;name&gt; &lt;definition&gt;, /profile, /switch-profile &lt;name&gt; · /task &lt;description&gt;</p>
         </footer>
       </div>
     </div>
