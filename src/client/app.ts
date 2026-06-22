@@ -43,6 +43,21 @@ const TASK_STAGE_LABELS: Record<TaskStage, string> = {
   done: 'Done',
 };
 
+// Single source of truth for the slash commands — drives both the /help output
+// and the command-matching regex in send().
+const COMMANDS: { usage: string; description: string }[] = [
+  { usage: '/help', description: 'Show this list of commands' },
+  { usage: '/short-memory <text>', description: 'Add to short-term memory (this dialog only, never saved)' },
+  { usage: '/work-memory <text>', description: 'Add to working memory (this session/task, saved)' },
+  { usage: '/long-memory <text>', description: 'Add to long-term memory (global, all dialogs)' },
+  { usage: '/create-profile <name> <definition>', description: 'Create and activate a response profile (style/format/limits)' },
+  { usage: '/profile', description: 'Show the active profile' },
+  { usage: '/switch-profile <name>', description: 'Switch the active profile' },
+  { usage: '/add-invariant <text>', description: 'Add a global hard constraint the assistant must never break' },
+  { usage: '/invariants', description: 'List all invariants' },
+  { usage: '/task <description>', description: 'Run a staged task: planning → execution → validation → done (reply “стоп” to stop)' },
+];
+
 interface Settings {
   model: string;
   maxTokens: number;
@@ -601,12 +616,15 @@ class Chat {
     }
   }
 
-  private addSystemNote(text: string) {
+  private addSystemNote(text: string, opts: { align?: 'left' | 'center'; mono?: boolean } = {}) {
     this.hideWelcome();
     const row = document.createElement('div');
     row.className = 'message message-system';
     row.innerHTML = `<div class="bubble bubble-system"></div>`;
-    row.querySelector('.bubble')!.textContent = text;
+    const bubble = row.querySelector('.bubble')!;
+    if (opts.align === 'left') bubble.classList.add('align-left');
+    if (opts.mono) bubble.classList.add('mono');
+    bubble.textContent = text;
     this.messagesEl.appendChild(row);
     this.scrollBottom();
   }
@@ -729,6 +747,12 @@ class Chat {
     this.activeTask = null;
     this.renderTaskStatus();
     this.addSystemNote(`Task stopped at the ${stageLabel} stage: "${task.description}". Back to a normal conversation.`);
+  }
+
+  private handleHelpCommand(): void {
+    const width = Math.max(...COMMANDS.map(c => c.usage.length));
+    const lines = COMMANDS.map(c => `${c.usage.padEnd(width)}  —  ${c.description}`);
+    this.addSystemNote(`Available commands:\n\n${lines.join('\n')}`, { align: 'left', mono: true });
   }
 
   private async handleMemoryCommand(command: string, content: string): Promise<void> {
@@ -1176,14 +1200,16 @@ class Chat {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
 
-    const cmdMatch = text.match(/^\/(short-memory|work-memory|long-memory|create-profile|profile|switch-profile|task|add-invariant|invariants)(?:\s+([\s\S]+))?$/);
+    const cmdMatch = text.match(/^\/(help|short-memory|work-memory|long-memory|create-profile|profile|switch-profile|task|add-invariant|invariants)(?:\s+([\s\S]+))?$/);
     if (cmdMatch) {
       this.inputEl.value = '';
       this.inputEl.style.height = 'auto';
       this.syncSendBtn();
       const command = cmdMatch[1];
       const content = (cmdMatch[2] ?? '').trim();
-      if (command === 'create-profile' || command === 'profile' || command === 'switch-profile') {
+      if (command === 'help') {
+        this.handleHelpCommand();
+      } else if (command === 'create-profile' || command === 'profile' || command === 'switch-profile') {
         await this.handleProfileCommand(command, content);
       } else if (command === 'task') {
         await this.handleTaskCommand(content);
